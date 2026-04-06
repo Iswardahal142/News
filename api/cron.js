@@ -16,6 +16,7 @@ const RSS_FEEDS = [
   { name: "🗞 Sentinel Assam", url: "https://www.sentinelassam.com/feed/" },
 ];
 
+// ── Breaking news keywords ──────────────────────────────────────────────────
 const BREAKING_KEYWORDS = [
   "dead", "death", "killed", "dies", "blast", "explosion", "bomb",
   "accident", "crash", "fire", "flood", "earthquake", "attack",
@@ -23,6 +24,7 @@ const BREAKING_KEYWORDS = [
   "injured", "critical", "emergency", "strike", "shutdown"
 ];
 
+// ── Category detection ──────────────────────────────────────────────────────
 const CATEGORIES = [
   { tag: "🔴 Crime", keywords: ["murder", "killed", "arrested", "robbery", "theft", "rape", "assault", "crime", "police", "fir", "custody", "drug"] },
   { tag: "🏛 Politics", keywords: ["bjp", "congress", "minister", "election", "vote", "cm ", "chief minister", "mla", "mp ", "party", "government", "modi", "himanta"] },
@@ -34,7 +36,8 @@ const CATEGORIES = [
 ];
 
 function detectBreaking(title) {
-  return BREAKING_KEYWORDS.some(kw => title.toLowerCase().includes(kw));
+  const lower = title.toLowerCase();
+  return BREAKING_KEYWORDS.some(kw => lower.includes(kw));
 }
 
 function detectCategory(title) {
@@ -45,6 +48,8 @@ function detectCategory(title) {
   return "📰 General";
 }
 
+// ── Duplicate topic filter ─────────────────────────────────────────────────
+// Top 3 meaningful words from title = topic fingerprint
 function getTopicKey(title) {
   const stopWords = new Set(["the", "a", "an", "in", "on", "at", "of", "to", "is", "are", "was", "were", "and", "or", "for", "with", "from", "by"]);
   const words = title.toLowerCase()
@@ -69,12 +74,14 @@ async function isTopicSeen(topicKey) {
 
 async function markTopicSeen(topicKey) {
   try {
+    // 12 hours expiry — same topic can reappear next cycle
     await fetch(`${UPSTASH_URL}/set/${topicKey}/1/ex/43200`, {
       headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
     });
   } catch {}
 }
 
+// ── Article sent check ─────────────────────────────────────────────────────
 async function isSent(id) {
   try {
     const res = await fetch(`${UPSTASH_URL}/get/sent:${id}`, {
@@ -93,43 +100,21 @@ async function markSent(id) {
   } catch {}
 }
 
-// ── Store full message data in Upstash for webhook ─────────────────────────
-async function storeMessageData(msgId, payload) {
-  try {
-    await fetch(`${UPSTASH_URL}/set/msgdata:${msgId}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${UPSTASH_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ value: JSON.stringify(payload), ex: 86400 }),
-    });
-  } catch {}
-}
-
-// ── AI Summary — Assamese + Hindi in one call ──────────────────────────────
+// ── AI Summary ─────────────────────────────────────────────────────────────
 async function summarizeWithAI(title, description) {
   try {
     const prompt = `News title: ${title}
 Description: ${description || "N/A"}
 
-Do the following:
-1. Write 3-4 bullet points in Assamese language summarizing this news.
-2. Write 3-4 bullet points in Hindi language summarizing this news.
-
-Rules:
-- Only bullet points, no extra text or headings.
-- No blank lines between bullets within a section.
-- Separate the two sections with exactly this divider on its own line: ---HINDI---
-
+Ei news-khini Assamese bhashat 4-5 ta bullet point-ot likhok.
+Kevol bullet points likhiba, aaru kono text nalikhiba.
+Pratita point-t ekota maat thakiba.
+Bullet points-ৰ মাজত কোনো blank line নাৰাখিবা।
 Format:
-• Assamese point 1
-• Assamese point 2
-• Assamese point 3
----HINDI---
-• Hindi point 1
-• Hindi point 2
-• Hindi point 3`;
+• point 1
+• point 2
+• point 3
+• point 4`;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -142,35 +127,48 @@ Format:
       body: JSON.stringify({
         model: "openai/gpt-5.4-nano",
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 500,
+        max_tokens: 300,
         temperature: 0.3,
       }),
     });
 
     const data = await response.json();
-    const raw = data?.choices?.[0]?.message?.content?.trim() || "";
-    const parts = raw.split("---HINDI---");
-    return {
-      assamese: parts[0]?.trim() || null,
-      hindi: parts[1]?.trim() || null,
-    };
+    return data?.choices?.[0]?.message?.content?.trim() || null;
   } catch (err) {
     console.error("AI error:", err.message);
-    return { assamese: null, hindi: null };
+    return null;
   }
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
 function escapeHtml(text = "") {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function formatBullets(text) {
-  if (!text) return "";
-  return text.split("\n")
-    .filter(l => l.trim())
-    .map(line => line.replace(/^[•\-\*]\s*/, ""))
-    .map(line => `▪️ ${escapeHtml(line)}`)
-    .join("\n");
+function formatMessage(item, feedName, aiSummary, isBreaking, category) {
+  const title = escapeHtml(item.title || "");
+  const pubDate = item.pubDate
+    ? new Date(item.pubDate).toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
+      })
+    : "";
+
+  const header = isBreaking
+    ? `🚨 <b>BREAKING NEWS</b> 🚨\n${category} | ${feedName}\n🕐 ${pubDate}`
+    : `${category} | ${feedName}\n🕐 ${pubDate}`;
+
+  let msg = `${header}\n\n<b>${title}</b>\n\n`;
+
+  if (aiSummary) {
+    const lines = aiSummary.split("\n").filter(l => l.trim());
+    const formatted = lines
+      .map(line => line.replace(/^[•\-\*]\s*/, ""))
+      .map(line => `▪️ ${escapeHtml(line)}`)
+      .join("\n\n");
+    msg += formatted;
+  }
+
+  return msg;
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -196,8 +194,10 @@ export default async function handler(req, res) {
         const rawId = item.guid || item.link || item.title || "";
         const id = Buffer.from(rawId).toString("base64").substring(0, 40);
 
+        // Skip if exact article already sent
         if (await isSent(id)) continue;
 
+        // Skip if same topic already covered from another source
         const topicKey = getTopicKey(item.title || "");
         if (await isTopicSeen(topicKey)) {
           console.log(`⏭ Duplicate topic skipped: ${item.title}`);
@@ -208,62 +208,19 @@ export default async function handler(req, res) {
         const category = detectCategory(item.title || "");
         const description = item.contentSnippet || item.content || item.description || "";
         const aiSummary = await summarizeWithAI(item.title, description);
+        const message = formatMessage(item, feed.name, aiSummary, isBreaking, category);
         const sourceName = item.source?.title || item['source.title'] || feed.name;
 
-        const pubDate = item.pubDate
-          ? new Date(item.pubDate).toLocaleString("en-IN", {
-              timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
-            })
-          : "";
-        const title = escapeHtml(item.title || "");
-        const header = isBreaking
-          ? `🚨 <b>BREAKING NEWS</b> 🚨\n${category} | ${feed.name}\n🕐 ${pubDate}`
-          : `${category} | ${feed.name}\n🕐 ${pubDate}`;
-
-        // Build Assamese message (shown first)
-        let message = `${header}\n\n<b>${title}</b>`;
-        if (aiSummary.assamese) {
-          message += `\n\n🟡 <b>অসমীয়া</b>\n${formatBullets(aiSummary.assamese)}`;
-        }
-
         try {
-          // Step 1: Send with placeholder callback
-          const sent = await bot.sendMessage(CHAT_ID, message, {
+          await bot.sendMessage(CHAT_ID, message, {
             parse_mode: "HTML",
             disable_web_page_preview: true,
             reply_markup: {
               inline_keyboard: [[
-                { text: "🔵 हिंदी में पढ़ें", callback_data: `hindi:0` },
                 { text: `📰 ${sourceName}`, web_app: { url: item.link } }
               ]]
             }
           });
-
-          const msgId = sent?.message_id;
-
-          if (msgId) {
-            // Step 2: Update button with real message_id
-            await bot.editMessageReplyMarkup(
-              {
-                inline_keyboard: [[
-                  { text: "🔵 हिंदी में पढ़ें", callback_data: `hindi:${msgId}` },
-                  { text: `📰 ${sourceName}`, web_app: { url: item.link } }
-                ]]
-              },
-              { chat_id: CHAT_ID, message_id: msgId }
-            );
-
-            // Step 3: Store data for webhook
-            await storeMessageData(msgId, {
-              header,
-              title,
-              assamese: aiSummary.assamese,
-              hindi: aiSummary.hindi,
-              sourceName,
-              link: item.link,
-            });
-          }
-
           await markSent(id);
           await markTopicSeen(topicKey);
           totalSent++;
