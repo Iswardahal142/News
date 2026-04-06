@@ -24,6 +24,11 @@ const BREAKING_KEYWORDS = [
   "injured", "critical", "emergency", "strike", "shutdown"
 ];
 
+// ── Skip/filter keywords (teer, lottery, etc.) ─────────────────────────────
+const SKIP_KEYWORDS = [
+  "teer", "tir result", "shillong teer", "khanapara teer", "lottery", "lucky number"
+];
+
 // ── Category detection ──────────────────────────────────────────────────────
 const CATEGORIES = [
   { tag: "🔴 Crime", keywords: ["murder", "killed", "arrested", "robbery", "theft", "rape", "assault", "crime", "police", "fir", "custody", "drug"] },
@@ -46,6 +51,11 @@ function detectCategory(title) {
     if (cat.keywords.some(kw => lower.includes(kw))) return cat.tag;
   }
   return "📰 General";
+}
+
+function shouldSkip(title) {
+  const lower = title.toLowerCase();
+  return SKIP_KEYWORDS.some(kw => lower.includes(kw));
 }
 
 // ── Duplicate topic filter ─────────────────────────────────────────────────
@@ -174,7 +184,7 @@ function formatMessage(item, feedName, aiSummary, isBreaking, category) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // ── Main handler ───────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   const bot = new TelegramBot(BOT_TOKEN);
   const parser = new Parser({
     headers: { "User-Agent": "Mozilla/5.0" },
@@ -188,7 +198,7 @@ export default async function handler(req, res) {
   for (const feed of RSS_FEEDS) {
     try {
       const result = await parser.parseURL(feed.url);
-      const items = result.items.slice(0, 3);
+      const items = result.items.slice(0, 5);
 
       for (const item of items) {
         const rawId = item.guid || item.link || item.title || "";
@@ -196,6 +206,12 @@ export default async function handler(req, res) {
 
         // Skip if exact article already sent
         if (await isSent(id)) continue;
+
+        // Skip teer / lottery / unwanted topics
+        if (shouldSkip(item.title || "")) {
+          console.log(`⏭ Teer/unwanted skipped: ${item.title}`);
+          continue;
+        }
 
         // Skip if same topic already covered from another source
         const topicKey = getTopicKey(item.title || "");
@@ -217,7 +233,7 @@ export default async function handler(req, res) {
             disable_web_page_preview: true,
             reply_markup: {
               inline_keyboard: [[
-                { text: `📰 ${sourceName}`, web_app: { url: item.link } }
+                { text: `📰 ${sourceName}`, url: item.link }
               ]]
             }
           });
@@ -232,4 +248,4 @@ export default async function handler(req, res) {
 
   console.log(`✅ Total sent: ${totalSent}`);
   return res.status(200).json({ success: true, sent: totalSent });
-}
+};
