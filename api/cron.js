@@ -39,8 +39,9 @@ async function summarizeWithAI(title, description) {
     const prompt = `News title: ${title}
 Description: ${description || "N/A"}
 
-Isko Hindi mein exactly 4 bullet points mein summarize karo.
-Sirf bullet points likho, koi aur text nahi.
+Ei news-khini Assamese bhashat 4-5 ta bullet point-ot likhok.
+Kevol bullet points likhiba, aaru kono text nalikhiba.
+Pratita point-t ekota maat thakiba.
 Format:
 • point 1
 • point 2
@@ -85,8 +86,7 @@ function formatMessage(item, sourceName, aiSummary) {
     : "";
 
   let msg = `${sourceName} | ⏰ ${pubDate}\n\n<b>${title}</b>\n\n`;
-  if (aiSummary) msg += `${escapeHtml(aiSummary)}\n\n`;
-  msg += `🔗 <a href="${link}">Poora padho</a>`;
+  if (aiSummary) msg += `${escapeHtml(aiSummary)}`;
   return msg;
 }
 
