@@ -19,7 +19,7 @@ export default async function handler(req, res) {
         "X-Title": "Assam News Bot",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.1-8b-instruct:free",
+        model: "deepseek/deepseek-r1:free",
         messages: [{ role: "user", content: "Say ONLY this: AI is working!" }],
         max_tokens: 20,
       }),
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     `Status: ${aiStatus}\n` +
     (aiResponse ? `Response: <code>${aiResponse}</code>\n` : "") +
     (aiError ? `Error: <code>${aiError}</code>\n` : "") +
-    `\nModel: meta-llama/llama-3.1-8b-instruct:free`;
+    `\nModel: deepseek/deepseek-r1:free`;
 
   try {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
