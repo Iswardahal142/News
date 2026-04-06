@@ -232,9 +232,10 @@ module.exports = async function handler(req, res) {
             parse_mode: "HTML",
             disable_web_page_preview: true,
             reply_markup: {
-              inline_keyboard: [[
-                { text: `📰 ${sourceName}`, web_app: { url: item.link } }
-              ]]
+              inline_keyboard: [
+                [{ text: `📰 ${sourceName}`, web_app: { url: item.link } }],
+                [{ text: "👌 Ok", callback_data: "delete_msg" }]
+              ]
             }
           });
           await markSent(id);
@@ -249,4 +250,3 @@ module.exports = async function handler(req, res) {
   console.log(`✅ Total sent: ${totalSent}`);
   return res.status(200).json({ success: true, sent: totalSent });
 };
-
