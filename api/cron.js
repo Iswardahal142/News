@@ -114,12 +114,6 @@ function sleep(ms) {
 // MAIN HANDLER
 // ============================================
 export default async function handler(req, res) {
-  // Security check
-  const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${CRON_SECRET}`) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
   const bot = new TelegramBot(BOT_TOKEN);
   const parser = new Parser({
     headers: { "User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)" },
