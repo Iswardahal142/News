@@ -56,7 +56,7 @@ Description: ${description || "N/A"}`;
         "X-Title": "Assam News Bot",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.0-flash-exp:free",
+        model: "meta-llama/llama-3.1-8b-instruct:free",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 300,
         temperature: 0.3,
