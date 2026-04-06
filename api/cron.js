@@ -77,17 +77,25 @@ function escapeHtml(text = "") {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function formatMessage(item, sourceName, aiSummary) {
+function formatMessage(item, feedName, aiSummary) {
   const title = escapeHtml(item.title || "");
-  const link = item.link || "";
   const pubDate = item.pubDate
     ? new Date(item.pubDate).toLocaleString("en-IN", {
         timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short",
       })
     : "";
 
-  let msg = `${sourceName} | ⏰ ${pubDate}\n\n<b>${title}</b>\n\n`;
-  if (aiSummary) msg += escapeHtml(aiSummary.replace(/\n/g, "\n\n"));
+  let msg = `${feedName}\n🕐 ${pubDate}\n\n<b>${title}</b>\n\n`;
+
+  if (aiSummary) {
+    const lines = aiSummary.split("\n").filter(l => l.trim());
+    const formatted = lines
+      .map(line => line.replace(/^[•\-\*]\s*/, ""))
+      .map(line => `▪️ ${escapeHtml(line)}`)
+      .join("\n\n");
+    msg += formatted;
+  }
+
   return msg;
 }
 
@@ -95,7 +103,13 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 export default async function handler(req, res) {
   const bot = new TelegramBot(BOT_TOKEN);
-  const parser = new Parser({ headers: { "User-Agent": "Mozilla/5.0" }, timeout: 10000 });
+  const parser = new Parser({
+    headers: { "User-Agent": "Mozilla/5.0" },
+    timeout: 10000,
+    customFields: {
+      item: [['source', 'source', { keepArray: false }]]
+    }
+  });
   let totalSent = 0;
 
   for (const feed of RSS_FEEDS) {
@@ -113,8 +127,19 @@ export default async function handler(req, res) {
         const aiSummary = await summarizeWithAI(item.title, description);
         const message = formatMessage(item, feed.name, aiSummary);
 
+        // Source name: from RSS item if available, fallback to feed name
+        const sourceName = item.source?.title || item['source.title'] || feed.name;
+
         try {
-          await bot.sendMessage(CHAT_ID, message, { parse_mode: "HTML", disable_web_page_preview: false });
+          await bot.sendMessage(CHAT_ID, message, {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_markup: {
+              inline_keyboard: [[
+                { text: `📰 ${sourceName}`, url: item.link }
+              ]]
+            }
+          });
           await markSent(id);
           totalSent++;
           await sleep(1500);
