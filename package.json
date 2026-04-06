@@ -1,0 +1,9 @@
+{
+  "name": "assam-news-bot-ai",
+  "version": "1.0.0",
+  "description": "AI-Powered Assam News Telegram Bot",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "rss-parser": "^3.13.0"
+  }
+}
