@@ -3,7 +3,7 @@ const TelegramBot = require("node-telegram-bot-api");
 const Parser = require("rss-parser");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
+const OWNER_CHAT_ID = process.env.OWNER_CHAT_ID;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -108,6 +108,24 @@ async function markSent(id) {
       headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
     });
   } catch {}
+}
+
+
+// ── Get all recipients from Redis ─────────────────────────────────────────
+async function getRecipients() {
+  try {
+    const res = await fetch(`${UPSTASH_URL}/get/news:users`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+    const data = await res.json();
+    const users = data.result ? JSON.parse(decodeURIComponent(data.result)) : [];
+    const ids = users.map(u => u.chatId);
+    // Always include owner
+    if (OWNER_CHAT_ID && !ids.includes(OWNER_CHAT_ID)) ids.unshift(OWNER_CHAT_ID);
+    return ids;
+  } catch {
+    return OWNER_CHAT_ID ? [OWNER_CHAT_ID] : [];
+  }
 }
 
 // ── AI Summary ─────────────────────────────────────────────────────────────
@@ -228,20 +246,26 @@ module.exports = async function handler(req, res) {
         const sourceName = item.source?.title || item['source.title'] || feed.name;
 
         try {
-          await bot.sendMessage(CHAT_ID, message, {
-            parse_mode: "HTML",
-            disable_web_page_preview: true,
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: `📰 ${sourceName}`, web_app: { url: item.link } }],
-                [{ text: "👌 Ok", callback_data: "delete_msg" }]
-              ]
-            }
-          });
+          const recipients = await getRecipients();
+          for (const chatId of recipients) {
+            try {
+              await bot.sendMessage(chatId, message, {
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: `📰 ${sourceName}`, web_app: { url: item.link } }],
+                    [{ text: "👌 Ok", callback_data: "delete_msg" }]
+                  ]
+                }
+              });
+              await sleep(500);
+            } catch (e) { console.error(`Send error [${chatId}]:`, e.message); }
+          }
           await markSent(id);
           await markTopicSeen(topicKey);
           totalSent++;
-          await sleep(1500);
+          await sleep(1000);
         } catch (err) { console.error("Telegram error:", err.message); }
       }
     } catch (err) { console.error(`Feed error [${feed.name}]:`, err.message); }
