@@ -19,7 +19,7 @@ export default async function handler(req, res) {
         "X-Title": "Assam News Bot",
       },
       body: JSON.stringify({
-        model: "deepseek/deepseek-r1:free",
+        model: "openai/gpt-5.4-nano",
         messages: [{ role: "user", content: "Say ONLY this: AI is working!" }],
         max_tokens: 20,
       }),
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     `Status: ${aiStatus}\n` +
     (aiResponse ? `Response: <code>${aiResponse}</code>\n` : "") +
     (aiError ? `Error: <code>${aiError}</code>\n` : "") +
-    `\nModel: deepseek/deepseek-r1:free`;
+    `\nModel: openai/gpt-5.4-nano`;
 
   try {
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
