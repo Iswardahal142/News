@@ -1,69 +1,115 @@
-// api/webhook.js — Telegram Bot Webhook Handler
+// api/webhook.js — Handles Telegram callback queries (language toggle)
+const TelegramBot = require("node-telegram-bot-api");
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+// ── Fetch stored message data from Upstash ─────────────────────────────────
+async function getMessageData(msgId) {
+  try {
+    const res = await fetch(`${UPSTASH_URL}/get/msgdata:${msgId}`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+    const data = await res.json();
+    if (!data.result) return null;
+    return JSON.parse(data.result);
+  } catch { return null; }
+}
+
+function escapeHtml(text = "") {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function formatBullets(text) {
+  if (!text) return "";
+  return text.split("\n")
+    .filter(l => l.trim())
+    .map(line => line.replace(/^[•\-\*]\s*/, ""))
+    .map(line => `▪️ ${escapeHtml(line)}`)
+    .join("\n");
+}
+
+// ── Main handler ───────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).json({ ok: true });
 
-  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const CHAT_ID = process.env.CHAT_ID;
-
+  const bot = new TelegramBot(BOT_TOKEN);
   const body = req.body;
-  const message = body?.message;
-  const callbackQuery = body?.callback_query;
 
-  // Helper — message bhejne ke liye
-  async function sendMessage(chatId, text, extra = {}) {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...extra }),
-    });
-  }
+  // ── Handle callback_query (button press) ──────────────────────────────
+  if (body?.callback_query) {
+    const query = body.callback_query;
+    const callbackData = query?.data || "";
+    const chatId = query?.message?.chat?.id;
+    const msgId = query?.message?.message_id;
 
-  // Helper — callback query answer karne ke liye
-  async function answerCallback(callbackQueryId, text = "") {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
-    });
-  }
+    // Acknowledge the callback immediately (removes loading spinner)
+    await bot.answerCallbackQuery(query.id);
 
-  // /start command
-  if (message?.text === "/start") {
-    const chatId = message.chat.id;
-    await sendMessage(
-      chatId,
-      `🙏 <b>Assam News Bot mein swagat hai!</b>\n\nRoj Assam, Biswanath aur Naduar ki latest news paao.\n\nNiche button dabao news lene ke liye 👇`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📰 Get News", callback_data: "get_news" }],
-          ],
-        },
+    // ── Hindi toggle ──────────────────────────────────────────────────
+    if (callbackData.startsWith("hindi:")) {
+      const storedMsgId = callbackData.split(":")[1];
+      const stored = await getMessageData(storedMsgId);
+
+      if (!stored) {
+        await bot.answerCallbackQuery(query.id, { text: "❌ Data expired. Please wait for next news cycle." });
+        return res.status(200).json({ ok: true });
       }
-    );
-  }
 
-  // Get News button press
-  if (callbackQuery?.data === "get_news") {
-    const chatId = callbackQuery.message.chat.id;
-    await answerCallback(callbackQuery.id, "⏳ News fetch ho rahi hai...");
+      // Build Hindi message
+      let newMessage = `${stored.header}\n\n<b>${stored.title}</b>`;
+      if (stored.hindi) {
+        newMessage += `\n\n🔵 <b>हिंदी</b>\n${formatBullets(stored.hindi)}`;
+      }
 
-    // Cron endpoint call karo
-    try {
-      await fetch(`${process.env.VERCEL_URL || "https://newsbyishwar.vercel.app"}/api/cron`);
-      await sendMessage(
-        chatId,
-        `✅ News fetch ho rahi hai! Thodi der mein aa jaayegi.`,
-        {
+      try {
+        await bot.editMessageText(newMessage, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
           reply_markup: {
-            inline_keyboard: [
-              [{ text: "📰 Get News", callback_data: "get_news" }],
-            ],
-          },
-        }
-      );
-    } catch (err) {
-      await sendMessage(chatId, "❌ Kuch error aaya, dobara try karo!");
+            inline_keyboard: [[
+              { text: "🟡 অসমীয়াত পঢ়ক", callback_data: `assamese:${storedMsgId}` },
+              { text: `📰 ${stored.sourceName}`, web_app: { url: stored.link } }
+            ]]
+          }
+        });
+      } catch (err) { console.error("Edit error (hindi):", err.message); }
+    }
+
+    // ── Assamese toggle (back button) ─────────────────────────────────
+    if (callbackData.startsWith("assamese:")) {
+      const storedMsgId = callbackData.split(":")[1];
+      const stored = await getMessageData(storedMsgId);
+
+      if (!stored) {
+        await bot.answerCallbackQuery(query.id, { text: "❌ Data expired." });
+        return res.status(200).json({ ok: true });
+      }
+
+      // Build Assamese message
+      let newMessage = `${stored.header}\n\n<b>${stored.title}</b>`;
+      if (stored.assamese) {
+        newMessage += `\n\n🟡 <b>অসমীয়া</b>\n${formatBullets(stored.assamese)}`;
+      }
+
+      try {
+        await bot.editMessageText(newMessage, {
+          chat_id: chatId,
+          message_id: msgId,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "🔵 हिंदी में पढ़ें", callback_data: `hindi:${storedMsgId}` },
+              { text: `📰 ${stored.sourceName}`, web_app: { url: stored.link } }
+            ]]
+          }
+        });
+      } catch (err) { console.error("Edit error (assamese):", err.message); }
     }
   }
 
