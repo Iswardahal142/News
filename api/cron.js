@@ -56,7 +56,7 @@ Format:
         "X-Title": "Assam News Bot",
       },
       body: JSON.stringify({
-        model: "meta-llama/llama-3.1-8b-instruct:free",
+        model: "openai/gpt-5.4-nano",
         messages: [{ role: "user", content: prompt }],
         max_tokens: 300,
         temperature: 0.3,
