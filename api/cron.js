@@ -1,4 +1,4 @@
-// api/cron.js — AI-Powered Assam News Bot (Fixed)
+// api/cron.js — AI-Powered Assam News Bot
 const TelegramBot = require("node-telegram-bot-api");
 const Parser = require("rss-parser");
 
@@ -16,6 +16,72 @@ const RSS_FEEDS = [
   { name: "🗞 Sentinel Assam", url: "https://www.sentinelassam.com/feed/" },
 ];
 
+// ── Breaking news keywords ──────────────────────────────────────────────────
+const BREAKING_KEYWORDS = [
+  "dead", "death", "killed", "dies", "blast", "explosion", "bomb",
+  "accident", "crash", "fire", "flood", "earthquake", "attack",
+  "murder", "riot", "arrested", "missing", "tragedy", "disaster",
+  "injured", "critical", "emergency", "strike", "shutdown"
+];
+
+// ── Category detection ──────────────────────────────────────────────────────
+const CATEGORIES = [
+  { tag: "🔴 Crime", keywords: ["murder", "killed", "arrested", "robbery", "theft", "rape", "assault", "crime", "police", "fir", "custody", "drug"] },
+  { tag: "🏛 Politics", keywords: ["bjp", "congress", "minister", "election", "vote", "cm ", "chief minister", "mla", "mp ", "party", "government", "modi", "himanta"] },
+  { tag: "🌦 Weather", keywords: ["flood", "rain", "storm", "cyclone", "earthquake", "landslide", "drought", "weather", "temperature"] },
+  { tag: "⚽ Sports", keywords: ["football", "cricket", "match", "tournament", "player", "team", "goal", "win", "loss", "ipl", "league"] },
+  { tag: "💼 Business", keywords: ["market", "economy", "startup", "investment", "trade", "company", "industry", "bank", "gdp", "price"] },
+  { tag: "🎓 Education", keywords: ["school", "college", "university", "exam", "student", "teacher", "result", "admission"] },
+  { tag: "🏥 Health", keywords: ["hospital", "disease", "covid", "dengue", "malaria", "health", "doctor", "medicine", "patient", "outbreak"] },
+];
+
+function detectBreaking(title) {
+  const lower = title.toLowerCase();
+  return BREAKING_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function detectCategory(title) {
+  const lower = title.toLowerCase();
+  for (const cat of CATEGORIES) {
+    if (cat.keywords.some(kw => lower.includes(kw))) return cat.tag;
+  }
+  return "📰 General";
+}
+
+// ── Duplicate topic filter ─────────────────────────────────────────────────
+// Top 3 meaningful words from title = topic fingerprint
+function getTopicKey(title) {
+  const stopWords = new Set(["the", "a", "an", "in", "on", "at", "of", "to", "is", "are", "was", "were", "and", "or", "for", "with", "from", "by"]);
+  const words = title.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(w => w.length > 3 && !stopWords.has(w))
+    .slice(0, 3)
+    .sort()
+    .join("_");
+  return `topic:${words}`;
+}
+
+async function isTopicSeen(topicKey) {
+  try {
+    const res = await fetch(`${UPSTASH_URL}/get/${topicKey}`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+    const data = await res.json();
+    return data.result !== null;
+  } catch { return false; }
+}
+
+async function markTopicSeen(topicKey) {
+  try {
+    // 12 hours expiry — same topic can reappear next cycle
+    await fetch(`${UPSTASH_URL}/set/${topicKey}/1/ex/43200`, {
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+    });
+  } catch {}
+}
+
+// ── Article sent check ─────────────────────────────────────────────────────
 async function isSent(id) {
   try {
     const res = await fetch(`${UPSTASH_URL}/get/sent:${id}`, {
@@ -34,6 +100,7 @@ async function markSent(id) {
   } catch {}
 }
 
+// ── AI Summary ─────────────────────────────────────────────────────────────
 async function summarizeWithAI(title, description) {
   try {
     const prompt = `News title: ${title}
@@ -73,11 +140,12 @@ Format:
   }
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────
 function escapeHtml(text = "") {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function formatMessage(item, feedName, aiSummary) {
+function formatMessage(item, feedName, aiSummary, isBreaking, category) {
   const title = escapeHtml(item.title || "");
   const pubDate = item.pubDate
     ? new Date(item.pubDate).toLocaleString("en-IN", {
@@ -85,7 +153,11 @@ function formatMessage(item, feedName, aiSummary) {
       })
     : "";
 
-  let msg = `${feedName}\n🕐 ${pubDate}\n\n<b>${title}</b>\n\n`;
+  const header = isBreaking
+    ? `🚨 <b>BREAKING NEWS</b> 🚨\n${category} | ${feedName}\n🕐 ${pubDate}`
+    : `${category} | ${feedName}\n🕐 ${pubDate}`;
+
+  let msg = `${header}\n\n<b>${title}</b>\n\n`;
 
   if (aiSummary) {
     const lines = aiSummary.split("\n").filter(l => l.trim());
@@ -101,6 +173,7 @@ function formatMessage(item, feedName, aiSummary) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// ── Main handler ───────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   const bot = new TelegramBot(BOT_TOKEN);
   const parser = new Parser({
@@ -121,13 +194,21 @@ export default async function handler(req, res) {
         const rawId = item.guid || item.link || item.title || "";
         const id = Buffer.from(rawId).toString("base64").substring(0, 40);
 
+        // Skip if exact article already sent
         if (await isSent(id)) continue;
 
+        // Skip if same topic already covered from another source
+        const topicKey = getTopicKey(item.title || "");
+        if (await isTopicSeen(topicKey)) {
+          console.log(`⏭ Duplicate topic skipped: ${item.title}`);
+          continue;
+        }
+
+        const isBreaking = detectBreaking(item.title || "");
+        const category = detectCategory(item.title || "");
         const description = item.contentSnippet || item.content || item.description || "";
         const aiSummary = await summarizeWithAI(item.title, description);
-        const message = formatMessage(item, feed.name, aiSummary);
-
-        // Source name: from RSS item if available, fallback to feed name
+        const message = formatMessage(item, feed.name, aiSummary, isBreaking, category);
         const sourceName = item.source?.title || item['source.title'] || feed.name;
 
         try {
@@ -141,6 +222,7 @@ export default async function handler(req, res) {
             }
           });
           await markSent(id);
+          await markTopicSeen(topicKey);
           totalSent++;
           await sleep(1500);
         } catch (err) { console.error("Telegram error:", err.message); }
