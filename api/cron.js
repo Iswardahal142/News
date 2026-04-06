@@ -217,7 +217,7 @@ export default async function handler(req, res) {
             disable_web_page_preview: true,
             reply_markup: {
               inline_keyboard: [[
-                { text: `📰 ${sourceName}`, url: item.link }
+                { text: `📰 ${sourceName}`, web_app: { url: item.link } }
               ]]
             }
           });
