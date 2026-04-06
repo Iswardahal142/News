@@ -42,6 +42,7 @@ Description: ${description || "N/A"}
 Ei news-khini Assamese bhashat 4-5 ta bullet point-ot likhok.
 Kevol bullet points likhiba, aaru kono text nalikhiba.
 Pratita point-t ekota maat thakiba.
+Bullet points-ৰ মাজত কোনো blank line নাৰাখিবা।
 Format:
 • point 1
 • point 2
@@ -86,7 +87,7 @@ function formatMessage(item, sourceName, aiSummary) {
     : "";
 
   let msg = `${sourceName} | ⏰ ${pubDate}\n\n<b>${title}</b>\n\n`;
-  if (aiSummary) msg += `${escapeHtml(aiSummary)}`;
+  if (aiSummary) msg += escapeHtml(aiSummary.replace(/\n/g, "\n\n"));
   return msg;
 }
 
