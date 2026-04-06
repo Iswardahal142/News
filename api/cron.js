@@ -249,3 +249,4 @@ module.exports = async function handler(req, res) {
   console.log(`✅ Total sent: ${totalSent}`);
   return res.status(200).json({ success: true, sent: totalSent });
 };
+
