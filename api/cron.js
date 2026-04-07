@@ -123,7 +123,8 @@ async function getRecipients() {
       try { users = JSON.parse(decodeURIComponent(data.result)); }
       catch { users = JSON.parse(data.result); }
     }
-    const ids = users.map(u => u.chatId);
+    // Skip paused users
+    const ids = users.filter(u => !u.paused).map(u => u.chatId);
 
     // Include owner only if news is enabled (default ON)
     if (OWNER_CHAT_ID && !ids.includes(OWNER_CHAT_ID)) {
