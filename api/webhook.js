@@ -325,6 +325,47 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
+      // Like button — works for everyone
+      const userId = String(query.from.id);
+      if (data.startsWith("like_")) {
+        console.log(`Like pressed: data=${data}, userId=${userId}, chatId=${chatId}`);
+        const articleId = data.replace("like_", "");
+        const likesKey = `likes:${articleId}`;
+        const userLikeKey = `liked:${articleId}:${userId}`;
+
+        const likedRes = await fetch(`${UPSTASH_URL}/get/${userLikeKey}`, {
+          headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+        });
+        const likedData = await likedRes.json();
+        const alreadyLiked = likedData.result !== null;
+
+        let newCount;
+        if (alreadyLiked) {
+          await fetch(`${UPSTASH_URL}/del/${userLikeKey}`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+          const decrRes = await fetch(`${UPSTASH_URL}/decr/${likesKey}`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+          const decrData = await decrRes.json();
+          newCount = Math.max(0, Number(decrData.result) || 0);
+          await bot.answerCallbackQuery(query.id, { text: "Unlike kiya ✅" });
+        } else {
+          await fetch(`${UPSTASH_URL}/set/${userLikeKey}/1`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+          const incrRes = await fetch(`${UPSTASH_URL}/incr/${likesKey}`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+          const incrData = await incrRes.json();
+          newCount = Number(incrData.result) || 1;
+          await bot.answerCallbackQuery(query.id, { text: "❤️ Like kiya!" });
+        }
+
+        try {
+          const currentMarkup = query.message.reply_markup;
+          const newMarkup = JSON.parse(JSON.stringify(currentMarkup));
+          newMarkup.inline_keyboard = newMarkup.inline_keyboard.map(row =>
+            row.map(btn => btn.callback_data === data ? { ...btn, text: `❤️ ${newCount}` } : btn)
+          );
+          await bot.editMessageReplyMarkup(newMarkup, { chat_id: chatId, message_id: messageId });
+        } catch {}
+
+        return res.status(200).json({ ok: true });
+      }
+
       // Below this — only owner
       if (chatId !== String(OWNER_CHAT_ID)) {
         return res.status(200).json({ ok: true });
@@ -389,73 +430,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // ── Like handler — works for everyone ──
-    if (body.callback_query) {
-      const query = body.callback_query;
-      const chatId = String(query.message.chat.id);
-      const messageId = query.message.message_id;
-      const data = query.data;
-      const userId = String(query.from.id);
 
-      if (data.startsWith("like_")) {
-        console.log(`Like pressed: data=${data}, userId=${userId}, chatId=${chatId}`);
-        const articleId = data.replace("like_", "");
-        const likesKey = `likes:${articleId}`;
-        const userLikeKey = `liked:${articleId}:${userId}`;
-
-        // Check if user already liked
-        const likedRes = await fetch(`${UPSTASH_URL}/get/${userLikeKey}`, {
-          headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-        });
-        const likedData = await likedRes.json();
-        const alreadyLiked = likedData.result !== null;
-
-        let newCount;
-        if (alreadyLiked) {
-          // Unlike — decr
-          await fetch(`${UPSTASH_URL}/del/${userLikeKey}`, {
-            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-          });
-          const decrRes = await fetch(`${UPSTASH_URL}/decr/${likesKey}`, {
-            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-          });
-          const decrData = await decrRes.json();
-          newCount = Math.max(0, Number(decrData.result) || 0);
-          if (newCount === 0) await fetch(`${UPSTASH_URL}/set/${likesKey}/0`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
-          await bot.answerCallbackQuery(query.id, { text: "Unlike kiya ✅" });
-        } else {
-          // Like — incr
-          await fetch(`${UPSTASH_URL}/set/${userLikeKey}/1`, {
-            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-          });
-          const incrRes = await fetch(`${UPSTASH_URL}/incr/${likesKey}`, {
-            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-          });
-          const incrData = await incrRes.json();
-          newCount = Number(incrData.result) || 1;
-          await bot.answerCallbackQuery(query.id, { text: "❤️ Like kiya!" });
-        }
-
-        // Update button count
-        try {
-          const currentMarkup = query.message.reply_markup;
-          const newMarkup = JSON.parse(JSON.stringify(currentMarkup));
-          newMarkup.inline_keyboard = newMarkup.inline_keyboard.map(row =>
-            row.map(btn =>
-              btn.callback_data === data
-                ? { ...btn, text: `❤️ ${newCount}` }
-                : btn
-            )
-          );
-          await bot.editMessageReplyMarkup(newMarkup, {
-            chat_id: chatId,
-            message_id: messageId,
-          });
-        } catch {}
-
-        return res.status(200).json({ ok: true });
-      }
-    }
 
     return res.status(200).json({ ok: true });
   } catch (err) {
