@@ -261,12 +261,17 @@ module.exports = async function handler(req, res) {
           const recipients = await getRecipients();
           for (const chatId of recipients) {
             try {
+              // web_app only works in private chat, use url for groups
+              const isPrivate = !String(chatId).startsWith("-");
+              const sourceButton = isPrivate
+                ? { text: `📰 ${sourceName}`, web_app: { url: item.link } }
+                : { text: `📰 ${sourceName}`, url: item.link };
               await bot.sendMessage(chatId, message, {
                 parse_mode: "HTML",
                 disable_web_page_preview: true,
                 reply_markup: {
                   inline_keyboard: [
-                    [{ text: `📰 ${sourceName}`, web_app: { url: item.link } }],
+                    [sourceButton],
                     [{ text: "👌 Ok", callback_data: "delete_msg" }]
                   ]
                 }
