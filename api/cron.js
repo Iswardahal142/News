@@ -293,6 +293,7 @@ module.exports = async function handler(req, res) {
     } catch (err) { console.error(`Feed error [${feed.name}]:`, err.message); }
   }
 
-  console.log(`✅ Total sent: ${totalSent}`);
-  return res.status(200).json({ success: true, sent: totalSent });
+  const finalRecipients = await getRecipients();
+  console.log(`✅ Total sent: ${totalSent}, Recipients: ${JSON.stringify(finalRecipients)}`);
+  return res.status(200).json({ success: true, sent: totalSent, recipients: finalRecipients });
 };
