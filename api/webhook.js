@@ -44,9 +44,18 @@ async function saveUser(chatId, name) {
   const users = await getUsers();
   const exists = users.find(u => u.chatId === chatId);
   if (exists) return false;
-  users.push({ chatId, name });
+  users.push({ chatId, name, paused: false });
   await redisSet("news:users", users);
   return true;
+}
+
+async function togglePauseUser(chatId) {
+  const users = await getUsers();
+  const user = users.find(u => u.chatId === chatId);
+  if (!user) return null;
+  user.paused = !user.paused;
+  await redisSet("news:users", users);
+  return user.paused;
 }
 
 async function deleteUser(chatId) {
@@ -71,30 +80,16 @@ async function fetchName(bot, chatId) {
 
 // ── Main Menu ──────────────────────────────────────────────────────────────
 async function sendMainMenu(bot, chatId, messageId = null) {
-  const ownerNews = await redisGet("owner:news_enabled");
-  const newsOn = ownerNews === null ? true : ownerNews; // default ON
-  const toggleText = newsOn ? "📰 My News: ON ✅" : "📰 My News: OFF 🔕";
-
-  const text = "👋 <b>News Bot Admin Panel</b>\n\nKya karna hai?";
-  const reply_markup = {
-    inline_keyboard: [
-      [{ text: "➕ Add User", callback_data: "add_user" }],
-      [{ text: "👥 Users", callback_data: "view_users" }],
-      [{ text: toggleText, callback_data: "toggle_owner_news" }],
-      [{ text: "👌 Ok", callback_data: "delete_msg" }],
-    ],
-  };
-
+  // Just delete the current message if any, keyboard is persistent
   if (messageId) {
-    await bot.editMessageText(text, {
-      chat_id: chatId,
-      message_id: messageId,
-      parse_mode: "HTML",
-      reply_markup,
-    });
-  } else {
-    await bot.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup });
+    try { await bot.deleteMessage(chatId, messageId); } catch {}
   }
+  await bot.sendMessage(chatId, "✅ Main menu", {
+    reply_markup: { remove_keyboard: true },
+  });
+  const ownerNews = await redisGet("owner:news_enabled");
+  const newsOn = ownerNews === null ? true : ownerNews;
+  await sendReplyKeyboard(bot, chatId, newsOn);
 }
 
 // ── Users List ─────────────────────────────────────────────────────────────
@@ -136,15 +131,18 @@ async function sendUserDetail(bot, chatId, messageId, targetChatId) {
   const user = users.find(u => u.chatId === targetChatId);
   if (!user) return;
 
+  const pauseText = user.paused ? "▶️ Resume" : "⏸ Pause";
+  const statusText = user.paused ? "⏸ Paused" : "✅ Active";
+
   await bot.editMessageText(
-    `👤 <b>${user.name}</b>\n🆔 <code>${user.chatId}</code>`,
+    `👤 <b>${user.name}</b>\n🆔 <code>${user.chatId}</code>\nStatus: ${statusText}`,
     {
       chat_id: chatId,
       message_id: messageId,
       parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [
-          [{ text: "🗑 Delete", callback_data: `delete_user_${user.chatId}` }],
+          [{ text: pauseText, callback_data: `pause_${user.chatId}` }, { text: "🗑 Delete", callback_data: `delete_user_${user.chatId}` }],
           [{ text: "⬅️ Back", callback_data: "view_users" }],
           [{ text: "👌 Ok", callback_data: "delete_msg" }],
         ],
@@ -411,6 +409,13 @@ module.exports = async function handler(req, res) {
         const targetId = data.replace("delete_user_", "");
         await deleteUser(targetId);
         await sendUsersList(bot, chatId, messageId);
+        return res.status(200).json({ ok: true });
+      }
+
+      if (data.startsWith("pause_")) {
+        const targetId = data.replace("pause_", "");
+        const isPaused = await togglePauseUser(targetId);
+        await sendUserDetail(bot, chatId, messageId, targetId);
         return res.status(200).json({ ok: true });
       }
 
