@@ -120,8 +120,16 @@ async function getRecipients() {
     const data = await res.json();
     const users = data.result ? JSON.parse(data.result) : [];
     const ids = users.map(u => u.chatId);
-    // Always include owner
-    if (OWNER_CHAT_ID && !ids.includes(OWNER_CHAT_ID)) ids.unshift(OWNER_CHAT_ID);
+
+    // Include owner only if news is enabled (default ON)
+    if (OWNER_CHAT_ID && !ids.includes(OWNER_CHAT_ID)) {
+      const ownerNews = await fetch(`${UPSTASH_URL}/get/owner:news_enabled`, {
+        headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+      }).then(r => r.json()).then(d => d.result).catch(() => null);
+      const newsOn = ownerNews === null ? true : JSON.parse(ownerNews);
+      if (newsOn) ids.unshift(OWNER_CHAT_ID);
+    }
+
     return ids;
   } catch {
     return OWNER_CHAT_ID ? [OWNER_CHAT_ID] : [];
@@ -265,6 +273,16 @@ module.exports = async function handler(req, res) {
           await markSent(id);
           await markTopicSeen(topicKey);
           totalSent++;
+
+          // Update stats
+          try {
+            const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+            const todayKey = `stats:today:${today}`;
+            await fetch(`${UPSTASH_URL}/incr/${todayKey}`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+            await fetch(`${UPSTASH_URL}/expire/${todayKey}/86400`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+            await fetch(`${UPSTASH_URL}/incr/stats:total`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
+          } catch {}
+
           await sleep(1000);
         } catch (err) { console.error("Telegram error:", err.message); }
       }
