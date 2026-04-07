@@ -403,22 +403,35 @@ module.exports = async function handler(req, res) {
         const userLikeKey = `liked:${articleId}:${userId}`;
 
         // Check if user already liked
-        const alreadyLiked = await redisGet(userLikeKey);
+        const likedRes = await fetch(`${UPSTASH_URL}/get/${userLikeKey}`, {
+          headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+        });
+        const likedData = await likedRes.json();
+        const alreadyLiked = likedData.result !== null;
 
         let newCount;
         if (alreadyLiked) {
-          // Unlike
-          await redisDel(userLikeKey);
-          const current = await redisGet(likesKey) || 0;
-          newCount = Math.max(0, Number(current) - 1);
-          await redisSet(likesKey, newCount);
+          // Unlike — decr
+          await fetch(`${UPSTASH_URL}/del/${userLikeKey}`, {
+            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+          });
+          const decrRes = await fetch(`${UPSTASH_URL}/decr/${likesKey}`, {
+            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+          });
+          const decrData = await decrRes.json();
+          newCount = Math.max(0, Number(decrData.result) || 0);
+          if (newCount === 0) await fetch(`${UPSTASH_URL}/set/${likesKey}/0`, { headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` } });
           await bot.answerCallbackQuery(query.id, { text: "Unlike kiya ✅" });
         } else {
-          // Like
-          await redisSet(userLikeKey, 1);
-          const current = await redisGet(likesKey) || 0;
-          newCount = Number(current) + 1;
-          await redisSet(likesKey, newCount);
+          // Like — incr
+          await fetch(`${UPSTASH_URL}/set/${userLikeKey}/1`, {
+            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+          });
+          const incrRes = await fetch(`${UPSTASH_URL}/incr/${likesKey}`, {
+            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+          });
+          const incrData = await incrRes.json();
+          newCount = Number(incrData.result) || 1;
           await bot.answerCallbackQuery(query.id, { text: "❤️ Like kiya!" });
         }
 
