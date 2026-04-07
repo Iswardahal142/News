@@ -118,7 +118,7 @@ async function getRecipients() {
       headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
     });
     const data = await res.json();
-    const users = data.result ? JSON.parse(data.result) : [];
+    const users = data.result ? JSON.parse(decodeURIComponent(data.result)) : [];
     const ids = users.map(u => u.chatId);
 
     // Include owner only if news is enabled (default ON)
