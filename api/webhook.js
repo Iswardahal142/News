@@ -389,6 +389,60 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    // ── Like handler — works for everyone ──
+    if (body.callback_query) {
+      const query = body.callback_query;
+      const chatId = String(query.message.chat.id);
+      const messageId = query.message.message_id;
+      const data = query.data;
+      const userId = String(query.from.id);
+
+      if (data.startsWith("like_")) {
+        const articleId = data.replace("like_", "");
+        const likesKey = `likes:${articleId}`;
+        const userLikeKey = `liked:${articleId}:${userId}`;
+
+        // Check if user already liked
+        const alreadyLiked = await redisGet(userLikeKey);
+
+        let newCount;
+        if (alreadyLiked) {
+          // Unlike
+          await redisDel(userLikeKey);
+          const current = await redisGet(likesKey) || 0;
+          newCount = Math.max(0, Number(current) - 1);
+          await redisSet(likesKey, newCount);
+          await bot.answerCallbackQuery(query.id, { text: "Unlike kiya ✅" });
+        } else {
+          // Like
+          await redisSet(userLikeKey, 1);
+          const current = await redisGet(likesKey) || 0;
+          newCount = Number(current) + 1;
+          await redisSet(likesKey, newCount);
+          await bot.answerCallbackQuery(query.id, { text: "❤️ Like kiya!" });
+        }
+
+        // Update button count
+        try {
+          const currentMarkup = query.message.reply_markup;
+          const newMarkup = JSON.parse(JSON.stringify(currentMarkup));
+          newMarkup.inline_keyboard = newMarkup.inline_keyboard.map(row =>
+            row.map(btn =>
+              btn.callback_data === data
+                ? { ...btn, text: `❤️ ${newCount}` }
+                : btn
+            )
+          );
+          await bot.editMessageReplyMarkup(newMarkup, {
+            chat_id: chatId,
+            message_id: messageId,
+          });
+        } catch {}
+
+        return res.status(200).json({ ok: true });
+      }
+    }
+
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("Webhook error:", err.message);
