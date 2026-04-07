@@ -71,11 +71,16 @@ async function fetchName(bot, chatId) {
 
 // ── Main Menu ──────────────────────────────────────────────────────────────
 async function sendMainMenu(bot, chatId, messageId = null) {
+  const ownerNews = await redisGet("owner:news_enabled");
+  const newsOn = ownerNews === null ? true : ownerNews; // default ON
+  const toggleText = newsOn ? "📰 My News: ON ✅" : "📰 My News: OFF 🔕";
+
   const text = "👋 <b>News Bot Admin Panel</b>\n\nKya karna hai?";
   const reply_markup = {
     inline_keyboard: [
       [{ text: "➕ Add User", callback_data: "add_user" }],
       [{ text: "👥 Users", callback_data: "view_users" }],
+      [{ text: toggleText, callback_data: "toggle_owner_news" }],
       [{ text: "👌 Ok", callback_data: "delete_msg" }],
     ],
   };
@@ -148,6 +153,23 @@ async function sendUserDetail(bot, chatId, messageId, targetChatId) {
   );
 }
 
+
+// ── Reply Keyboard ─────────────────────────────────────────────────────────
+async function sendReplyKeyboard(bot, chatId, newsOn) {
+  const toggleText = newsOn ? "📰 My News: ON ✅" : "📰 My News: OFF 🔕";
+  await bot.sendMessage(chatId, "👋 <b>News Bot Admin Panel</b>", {
+    parse_mode: "HTML",
+    reply_markup: {
+      keyboard: [
+        [{ text: "➕ Add User" }, { text: "👥 Users" }],
+        [{ text: toggleText }, { text: "📊 Stats" }],
+      ],
+      resize_keyboard: true,
+      persistent: true,
+    },
+  });
+}
+
 // ── Main Handler ───────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).json({ ok: true });
@@ -171,7 +193,75 @@ module.exports = async function handler(req, res) {
       // /start command
       if (text === "/start") {
         await redisDel("owner:state");
-        await sendMainMenu(bot, fromId);
+        const ownerNews = await redisGet("owner:news_enabled");
+        const newsOn = ownerNews === null ? true : ownerNews;
+        await sendReplyKeyboard(bot, fromId, newsOn);
+        return res.status(200).json({ ok: true });
+      }
+
+      // Reply keyboard button handlers
+      if (text === "➕ Add User") {
+        await redisSet("owner:state", "waiting_chatid");
+        const sentMsg = await bot.sendMessage(fromId, "➕ <b>Add User</b>\n\nJis user/group ko add karna hai uska <b>Chat ID</b> bhejo:", {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: "❌ Cancel", callback_data: "cancel_add" }]],
+          },
+        });
+        await redisSet("owner:menu_msg_id", sentMsg.message_id);
+        return res.status(200).json({ ok: true });
+      }
+
+      if (text === "👥 Users") {
+        const users = await getUsers();
+        if (users.length === 0) {
+          await bot.sendMessage(fromId, "👥 <b>Users List</b>\n\nAbhi koi user add nahi hai.", { parse_mode: "HTML" });
+        } else {
+          const buttons = users.map(u => [{ text: `👤 ${u.name}`, callback_data: `user_${u.chatId}` }]);
+          buttons.push([{ text: "👌 Ok", callback_data: "delete_msg" }]);
+          await bot.sendMessage(fromId, `👥 <b>Users List</b>\n\nTotal: ${users.length}`, {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: buttons },
+          });
+        }
+        return res.status(200).json({ ok: true });
+      }
+
+      if (text === "📰 My News: ON ✅" || text === "📰 My News: OFF 🔕") {
+        const current = await redisGet("owner:news_enabled");
+        const currentVal = current === null ? true : current;
+        const newVal = !currentVal;
+        await redisSet("owner:news_enabled", newVal);
+        await sendReplyKeyboard(bot, fromId, newVal);
+        const status = newVal ? "✅ News ON kar diya!" : "🔕 News OFF kar diya!";
+        await bot.sendMessage(fromId, status);
+        return res.status(200).json({ ok: true });
+      }
+
+      if (text === "📊 Stats") {
+        const users = await getUsers();
+        const today = new Date().toISOString().split("T")[0];
+        const todayCount = await redisGet(`stats:today:${today}`) || 0;
+        const totalCount = await redisGet("stats:total") || 0;
+        const ownerNews = await redisGet("owner:news_enabled");
+        const newsOn = ownerNews === null ? true : ownerNews;
+        const statsText =
+          `📊 <b>Stats</b>
+
+` +
+          `👥 Total Users: <b>${users.length}</b>
+` +
+          `📰 Aaj bheje: <b>${todayCount}</b>
+` +
+          `📨 Total bheje: <b>${totalCount}</b>
+` +
+          `📡 My News: <b>${newsOn ? "ON ✅" : "OFF 🔕"}</b>`;
+        await bot.sendMessage(fromId, statsText, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: "👌 Ok", callback_data: "delete_msg" }]],
+          },
+        });
         return res.status(200).json({ ok: true });
       }
 
@@ -280,6 +370,21 @@ module.exports = async function handler(req, res) {
         const targetId = data.replace("delete_user_", "");
         await deleteUser(targetId);
         await sendUsersList(bot, chatId, messageId);
+        return res.status(200).json({ ok: true });
+      }
+
+      if (data === "toggle_owner_news") {
+        const current = await redisGet("owner:news_enabled");
+        const currentVal = current === null ? true : current;
+        await redisSet("owner:news_enabled", !currentVal);
+        await sendMainMenu(bot, chatId, messageId);
+        return res.status(200).json({ ok: true });
+      }
+
+      if (data === "cancel_add") {
+        await redisDel("owner:state");
+        await redisDel("owner:menu_msg_id");
+        await bot.deleteMessage(chatId, messageId);
         return res.status(200).json({ ok: true });
       }
     }
