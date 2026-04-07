@@ -150,6 +150,7 @@ Ei news-khini Assamese bhashat 4-5 ta bullet point-ot likhok.
 Kevol bullet points likhiba, aaru kono text nalikhiba.
 Pratita point-t ekota maat thakiba.
 Bullet points-ৰ মাজত কোনো blank line নাৰাখিবা।
+IMPORTANT: Manuh-ৰ naam, ঠাই-ৰ naam, party-ৰ naam, organization-ৰ naam (jেনে BJP, Congress, Assam, Delhi, Modi, etc.) সেইদৰে ৰাখিবা — translate নকৰিবা।
 Format:
 • point 1
 • point 2
@@ -266,13 +267,16 @@ module.exports = async function handler(req, res) {
               const sourceButton = isPrivate
                 ? { text: `📰 ${sourceName}`, web_app: { url: item.link } }
                 : { text: `📰 ${sourceName}`, url: item.link };
+              const actionButton = isPrivate
+                ? { text: "👌 Ok", callback_data: "delete_msg" }
+                : { text: "❤️ 0", callback_data: `like_${id}` };
               await bot.sendMessage(chatId, message, {
                 parse_mode: "HTML",
                 disable_web_page_preview: true,
                 reply_markup: {
                   inline_keyboard: [
                     [sourceButton],
-                    [{ text: "👌 Ok", callback_data: "delete_msg" }]
+                    [actionButton]
                   ]
                 }
               });
