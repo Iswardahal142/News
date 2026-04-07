@@ -398,6 +398,7 @@ module.exports = async function handler(req, res) {
       const userId = String(query.from.id);
 
       if (data.startsWith("like_")) {
+        console.log(`Like pressed: data=${data}, userId=${userId}, chatId=${chatId}`);
         const articleId = data.replace("like_", "");
         const likesKey = `likes:${articleId}`;
         const userLikeKey = `liked:${articleId}:${userId}`;
